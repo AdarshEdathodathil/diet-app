@@ -1,6 +1,6 @@
-# DT Haritha
+# Dt Haritha
 
-DT Haritha is an offline-first Flutter application for clinical dietitians working in OP/IP consultations. It provides transparent anthropometric and nutrition calculations while keeping the dietitian in control of every clinical factor.
+Dt Haritha is an offline-first Flutter application for clinical dietitians working in OP/IP consultations. It provides transparent anthropometric and nutrition calculations while keeping the dietitian in control of every clinical factor.
 
 ## Features
 
