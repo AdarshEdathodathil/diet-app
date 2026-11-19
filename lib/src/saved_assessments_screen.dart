@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'assessment_repository.dart';
@@ -14,15 +16,27 @@ class SavedAssessmentsScreen extends StatefulWidget {
 class _SavedAssessmentsScreenState extends State<SavedAssessmentsScreen> {
   final _search = TextEditingController();
   late Future<List<SavedAssessment>> _records = widget.repository.search('');
+  Timer? _searchTimer;
 
   @override
   void dispose() {
     _search.dispose();
+    _searchTimer?.cancel();
     super.dispose();
   }
 
-  void _runSearch() =>
+  void _runSearch({bool immediate = false}) {
+    _searchTimer?.cancel();
+    if (immediate) {
       setState(() => _records = widget.repository.search(_search.text));
+      return;
+    }
+    _searchTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(() => _records = widget.repository.search(_search.text));
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -94,7 +108,7 @@ class _SavedAssessmentsScreenState extends State<SavedAssessmentsScreen> {
                           : IconButton(
                               onPressed: () {
                                 _search.clear();
-                                _runSearch();
+                                _runSearch(immediate: true);
                               },
                               icon: const Icon(Icons.close_rounded),
                             ),

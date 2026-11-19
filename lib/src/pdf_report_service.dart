@@ -4,6 +4,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import 'models.dart';
+import 'patient.dart';
 
 class PdfReportService {
   const PdfReportService();
@@ -14,10 +15,15 @@ class PdfReportService {
     required List<String> diagnoses,
     required bool approved,
     required String notes,
+    Patient? patient,
+    int? assessmentId,
+    String clinicName = '',
+    String dietitianName = 'Dt Haritha',
+    String credentials = '',
   }) async {
     final document = pw.Document(
-      title: 'DT Haritha Assessment',
-      author: 'DT Haritha',
+      title: 'Dt Haritha Assessment',
+      author: dietitianName,
     );
     final now = DateTime.now();
     document.addPage(
@@ -33,7 +39,7 @@ class PdfReportService {
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
               pw.Text(
-                'DT Haritha',
+                clinicName.isNotEmpty ? clinicName : dietitianName,
                 style: pw.TextStyle(
                   fontSize: 17,
                   fontWeight: pw.FontWeight.bold,
@@ -65,10 +71,19 @@ class PdfReportService {
           _status(approved),
           pw.SizedBox(height: 16),
           _section('Patient information', [
+            if (assessmentId != null) _row('Assessment ID', '#$assessmentId'),
+            if (patient != null && patient.name.isNotEmpty)
+              _row('Patient name', patient.name),
+            if (patient != null && patient.opNumber.isNotEmpty)
+              _row('Hospital / OP number', patient.opNumber),
             _row('Assessment date', _date(now)),
             if (input.age != null) _row('Age', '${input.age} years'),
             if (input.gender != null) _row('Gender', input.gender!.label),
             if (diagnoses.isNotEmpty) _row('Diagnosis', diagnoses.join(', ')),
+          ]),
+          _section('Dietitian', [
+            _row('Name', dietitianName),
+            if (credentials.isNotEmpty) _row('Credentials', credentials),
           ]),
           _section('Anthropometric assessment', [
             if (input.heightCm != null)
@@ -149,6 +164,54 @@ class PdfReportService {
               'Clinical note: This report is a calculation and documentation aid. Final requirements must be reviewed and approved by a qualified dietitian.',
               style: const pw.TextStyle(fontSize: 9),
             ),
+          ),
+          pw.SizedBox(height: 18),
+          pw.Row(
+            children: [
+              pw.Expanded(
+                child: pw.Container(
+                  decoration: const pw.BoxDecoration(
+                    border: pw.Border(
+                      bottom: pw.BorderSide(color: PdfColors.grey500),
+                    ),
+                  ),
+                ),
+              ),
+              pw.SizedBox(width: 28),
+              pw.Expanded(
+                child: pw.Container(
+                  decoration: const pw.BoxDecoration(
+                    border: pw.Border(
+                      bottom: pw.BorderSide(color: PdfColors.grey500),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 4),
+          pw.Row(
+            children: [
+              pw.Expanded(
+                child: pw.Text(
+                  'Dietitian signature',
+                  style: const pw.TextStyle(
+                    fontSize: 9,
+                    color: PdfColors.grey600,
+                  ),
+                ),
+              ),
+              pw.SizedBox(width: 28),
+              pw.Expanded(
+                child: pw.Text(
+                  'Date',
+                  style: const pw.TextStyle(
+                    fontSize: 9,
+                    color: PdfColors.grey600,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

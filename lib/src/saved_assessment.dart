@@ -3,6 +3,7 @@ import 'dart:convert';
 class SavedAssessment {
   const SavedAssessment({
     this.id,
+    this.patientId,
     required this.createdAt,
     required this.updatedAt,
     required this.age,
@@ -15,6 +16,7 @@ class SavedAssessment {
   });
 
   final int? id;
+  final int? patientId;
   final DateTime createdAt;
   final DateTime updatedAt;
   final int age;
@@ -26,6 +28,7 @@ class SavedAssessment {
   final Map<String, dynamic> payload;
 
   Map<String, Object?> toDatabaseMap() => {
+    'patient_id': patientId,
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt.toIso8601String(),
     'age': age,
@@ -40,6 +43,7 @@ class SavedAssessment {
   factory SavedAssessment.fromDatabaseMap(Map<String, Object?> map) {
     return SavedAssessment(
       id: map['id'] as int,
+      patientId: map['patient_id'] as int?,
       createdAt: DateTime.parse(map['created_at'] as String),
       updatedAt: DateTime.parse(map['updated_at'] as String),
       age: map['age'] as int,

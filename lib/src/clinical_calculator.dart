@@ -32,8 +32,37 @@ class ClinicalCalculator {
     if (input.age != null && input.age! <= 0) {
       errors.add('Age must be a positive whole number.');
     }
+    if (input.age != null && input.age! > 120) {
+      errors.add('Age must be 120 years or less.');
+    }
+    if (validHeight && (input.heightCm! < 50 || input.heightCm! > 250)) {
+      errors.add('Height must be between 50 and 250 cm.');
+    }
+    if (validWeight &&
+        (input.actualWeightKg! < 2 || input.actualWeightKg! > 500)) {
+      errors.add('Weight must be between 2 and 500 kg.');
+    }
+    if (input.targetBmi < 10 || input.targetBmi > 60) {
+      errors.add('Target BMI must be between 10 and 60.');
+    }
     if (input.choPercent < 0 || input.choPercent > 100) {
       errors.add('CHO percentage must be between 0 and 100.');
+    }
+    if (input.calorieFactor <= 0 || input.calorieFactor > 100) {
+      errors.add('Calorie factor must be greater than 0 and no more than 100.');
+    }
+    if (input.proteinFactor <= 0 || input.proteinFactor > 5) {
+      errors.add('Protein factor must be greater than 0 and no more than 5.');
+    }
+    if (input.waterFactor <= 0 || input.waterFactor > 100) {
+      errors.add('Water factor must be greater than 0 and no more than 100.');
+    }
+    if (input.fibreGrams < 0 || input.fibreGrams > 100) {
+      errors.add('Fibre target must be between 0 and 100 g/day.');
+    }
+    if (input.calorieMethod == CalorieMethod.mifflinStJeor &&
+        (input.activityFactor < 1 || input.activityFactor > 3)) {
+      errors.add('Activity factor must be between 1 and 3.');
     }
 
     final calculatedIbw = heightM == null || input.targetBmi <= 0
@@ -117,10 +146,10 @@ class ClinicalCalculator {
     final water = _positive(input.manualWaterMl)
         ? input.manualWaterMl
         : calculatedWater;
-    if (input.manualIbwKg != null) {
+    if (_positive(input.manualIbwKg)) {
       warnings.add('IBW is manually overridden.');
     }
-    if (input.manualWaterMl != null) {
+    if (_positive(input.manualWaterMl)) {
       warnings.add('Water target is manually adjusted.');
     }
 

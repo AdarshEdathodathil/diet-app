@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
 
 import 'assessment_repository.dart';
+import 'app_settings.dart';
 import 'clinical_calculator.dart';
 import 'models.dart';
 import 'pdf_report_service.dart';
+import 'patient.dart';
 import 'saved_assessment.dart';
 import 'saved_assessments_screen.dart';
 
@@ -22,7 +26,20 @@ const diagnosisGroups = <String, List<String>>{
 };
 
 class AssessmentScreen extends StatefulWidget {
-  const AssessmentScreen({super.key});
+  const AssessmentScreen({
+    super.key,
+    this.repository,
+    this.patient,
+    this.initialAssessment,
+    this.duplicateInitialAssessment = false,
+    this.settings,
+  });
+
+  final AssessmentRepository? repository;
+  final Patient? patient;
+  final SavedAssessment? initialAssessment;
+  final bool duplicateInitialAssessment;
+  final AppSettings? settings;
 
   @override
   State<AssessmentScreen> createState() => _AssessmentScreenState();
@@ -31,7 +48,8 @@ class AssessmentScreen extends StatefulWidget {
 class _AssessmentScreenState extends State<AssessmentScreen> {
   final _calculator = const ClinicalCalculator();
   final _pdfService = const PdfReportService();
-  final _repository = AssessmentRepository();
+  late final AssessmentRepository _repository =
+      widget.repository ?? AssessmentRepository();
   final _age = TextEditingController();
   final _height = TextEditingController();
   final _weight = TextEditingController();
@@ -78,17 +96,34 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   bool _showEquations = false;
   int? _recordId;
   DateTime? _createdAt;
+  int? _patientId;
+  Timer? _draftTimer;
 
   @override
   void initState() {
     super.initState();
+    _patientId = widget.patient?.id;
+    if (widget.patient?.age != null) _age.text = '${widget.patient!.age}';
+    if (widget.patient?.gender == 'Male') _gender = Gender.male;
+    if (widget.patient?.gender == 'Female') _gender = Gender.female;
     for (final controller in _controllers) {
       controller.addListener(_refresh);
+    }
+    if (widget.initialAssessment != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadAssessment(
+          widget.initialAssessment!,
+          duplicate: widget.duplicateInitialAssessment,
+        );
+      });
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _restoreDraft());
     }
   }
 
   @override
   void dispose() {
+    _draftTimer?.cancel();
     for (final controller in _controllers) {
       controller.dispose();
     }
@@ -97,6 +132,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
   void _refresh() {
     if (mounted) setState(() => _approved = false);
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 700), _saveDraft);
   }
 
   double? _number(TextEditingController controller) =>
@@ -143,7 +180,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'DT Haritha',
+                    'Dt Haritha',
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w800,
@@ -165,6 +202,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         ),
         actions: [
           const _OfflineBadge(),
+          IconButton(
+            onPressed: _openPresets,
+            tooltip: 'Clinical presets',
+            icon: const Icon(Icons.tune_rounded),
+          ),
           IconButton(
             onPressed: _openSavedAssessments,
             tooltip: 'Saved assessments',
@@ -237,6 +279,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
               label: 'Age',
               suffix: 'years',
               integer: true,
+              min: 1,
+              max: 120,
             ),
             DropdownButtonFormField<Gender>(
               initialValue: _gender,
@@ -316,11 +360,19 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         title: 'Measurements',
         child: _ResponsiveFields(
           children: [
-            _NumberField(controller: _height, label: 'Height', suffix: 'cm'),
+            _NumberField(
+              controller: _height,
+              label: 'Height',
+              suffix: 'cm',
+              min: 50,
+              max: 250,
+            ),
             _NumberField(
               controller: _weight,
               label: 'Actual weight',
               suffix: 'kg',
+              min: 2,
+              max: 500,
             ),
           ],
         ),
@@ -344,6 +396,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
               controller: _targetBmi,
               label: 'Target BMI',
               suffix: 'kg/m²',
+              min: 10,
+              max: 60,
             ),
             _NumberField(
               controller: _manualIbw,
@@ -628,6 +682,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     final now = DateTime.now();
     final assessment = SavedAssessment(
       id: _recordId,
+      patientId: _patientId,
       createdAt: _createdAt ?? now,
       updatedAt: now,
       age: _integer(_age)!,
@@ -659,6 +714,16 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         'waterFactor': _waterFactor.text,
         'manualWater': _manualWater.text,
         'notes': _notes.text.trim(),
+        'calculatedIbwKg': result.ibwKg,
+        'bmrKcal': result.bmr,
+        'proteinGrams': result.proteinGrams,
+        'carbohydrateGrams': result.choGrams,
+        'fatGrams': result.fatGrams,
+        'waterMl': result.waterMl,
+        'macroEnergyKcal': result.macroEnergy,
+        'macroDifferenceKcal': result.macroDifference,
+        'warnings': result.warnings,
+        'approvalTimestamp': now.toIso8601String(),
       },
     );
     try {
@@ -671,6 +736,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Assessment #$id saved on this device.')),
       );
+      await _repository.deleteDraft(_draftKey);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -689,9 +755,14 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         diagnoses: _diagnoses.toList(),
         approved: _approved,
         notes: _notes.text.trim(),
+        patient: widget.patient,
+        assessmentId: _recordId,
+        clinicName: widget.settings?.clinicName ?? '',
+        dietitianName: widget.settings?.dietitianName ?? 'Dt Haritha',
+        credentials: widget.settings?.credentials ?? '',
       );
       await Printing.layoutPdf(
-        name: 'clinical_dietitian_assessment.pdf',
+        name: _reportFilename,
         onLayout: (_) async => bytes,
       );
     } catch (_) {
@@ -710,11 +781,13 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         diagnoses: _diagnoses.toList(),
         approved: _approved,
         notes: _notes.text.trim(),
+        patient: widget.patient,
+        assessmentId: _recordId,
+        clinicName: widget.settings?.clinicName ?? '',
+        dietitianName: widget.settings?.dietitianName ?? 'Dt Haritha',
+        credentials: widget.settings?.credentials ?? '',
       );
-      await Printing.sharePdf(
-        bytes: bytes,
-        filename: 'clinical_dietitian_assessment.pdf',
-      );
+      await Printing.sharePdf(bytes: bytes, filename: _reportFilename);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -733,7 +806,20 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     if (record != null) _loadAssessment(record);
   }
 
-  void _loadAssessment(SavedAssessment record) {
+  String get _reportFilename {
+    final identifier = widget.patient?.opNumber.trim().isNotEmpty == true
+        ? widget.patient!.opNumber.trim()
+        : 'patient_${_patientId ?? 'new'}';
+    final now = DateTime.now();
+    final date =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    return '${identifier}_${date}_assessment.pdf'.replaceAll(
+      RegExp(r'[^A-Za-z0-9_.-]'),
+      '_',
+    );
+  }
+
+  void _loadAssessment(SavedAssessment record, {bool duplicate = false}) {
     final data = record.payload;
     void setText(TextEditingController controller, String key) {
       controller.text = data[key]?.toString() ?? '';
@@ -756,8 +842,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     setText(_manualWater, 'manualWater');
     setText(_notes, 'notes');
     setState(() {
-      _recordId = record.id;
-      _createdAt = record.createdAt;
+      _recordId = duplicate ? null : record.id;
+      _createdAt = duplicate ? null : record.createdAt;
+      _patientId = record.patientId ?? _patientId;
       _gender = Gender.values.byName(data['gender'] as String);
       _diagnoses
         ..clear()
@@ -768,7 +855,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       _calorieBasis = WeightBasis.values.byName(data['calorieBasis'] as String);
       _proteinBasis = WeightBasis.values.byName(data['proteinBasis'] as String);
       _waterBasis = WeightBasis.values.byName(data['waterBasis'] as String);
-      _approved = record.approved;
+      _approved = duplicate ? false : record.approved;
       _step = 2;
     });
   }
@@ -796,6 +883,242 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       _recordId = null;
       _createdAt = null;
     });
+  }
+
+  String get _draftKey => 'patient_${_patientId ?? 'unassigned'}';
+
+  Future<void> _saveDraft() async {
+    if (!mounted || _recordId != null) return;
+    final hasContent =
+        _age.text.isNotEmpty ||
+        _height.text.isNotEmpty ||
+        _weight.text.isNotEmpty ||
+        _notes.text.isNotEmpty;
+    if (!hasContent) return;
+    await _repository.saveDraft(_draftKey, {
+      'patientId': _patientId,
+      'age': _age.text,
+      'gender': _gender?.name,
+      'diagnoses': _diagnoses.toList(),
+      'height': _height.text,
+      'weight': _weight.text,
+      'targetBmi': _targetBmi.text,
+      'manualIbw': _manualIbw.text,
+      'calorieMethod': _calorieMethod.name,
+      'calorieBasis': _calorieBasis.name,
+      'calorieCustomWeight': _calorieCustomWeight.text,
+      'calorieFactor': _calorieFactor.text,
+      'activityFactor': _activityFactor.text,
+      'proteinBasis': _proteinBasis.name,
+      'proteinCustomWeight': _proteinCustomWeight.text,
+      'proteinFactor': _proteinFactor.text,
+      'choPercent': _choPercent.text,
+      'fibre': _fibre.text,
+      'waterBasis': _waterBasis.name,
+      'waterCustomWeight': _waterCustomWeight.text,
+      'waterFactor': _waterFactor.text,
+      'manualWater': _manualWater.text,
+      'notes': _notes.text,
+    });
+  }
+
+  Future<void> _restoreDraft() async {
+    final draft = await _repository.loadDraft(_draftKey);
+    if (!mounted || draft == null) return;
+    final restore = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Restore draft?'),
+        content: const Text(
+          'An unfinished assessment was saved for this patient.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Discard'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Restore'),
+          ),
+        ],
+      ),
+    );
+    if (restore == true) {
+      _applyValues(draft);
+    } else {
+      await _repository.deleteDraft(_draftKey);
+    }
+  }
+
+  Map<String, dynamic> get _presetValues => {
+    'targetBmi': _targetBmi.text,
+    'calorieMethod': _calorieMethod.name,
+    'calorieBasis': _calorieBasis.name,
+    'calorieFactor': _calorieFactor.text,
+    'activityFactor': _activityFactor.text,
+    'proteinBasis': _proteinBasis.name,
+    'proteinFactor': _proteinFactor.text,
+    'choPercent': _choPercent.text,
+    'fibre': _fibre.text,
+    'waterBasis': _waterBasis.name,
+    'waterFactor': _waterFactor.text,
+  };
+
+  void _applyValues(Map<String, dynamic> data) {
+    void setText(TextEditingController controller, String key) {
+      if (data[key] != null) controller.text = data[key].toString();
+    }
+
+    for (final entry in <(TextEditingController, String)>[
+      (_age, 'age'),
+      (_height, 'height'),
+      (_weight, 'weight'),
+      (_targetBmi, 'targetBmi'),
+      (_manualIbw, 'manualIbw'),
+      (_calorieCustomWeight, 'calorieCustomWeight'),
+      (_calorieFactor, 'calorieFactor'),
+      (_activityFactor, 'activityFactor'),
+      (_proteinCustomWeight, 'proteinCustomWeight'),
+      (_proteinFactor, 'proteinFactor'),
+      (_choPercent, 'choPercent'),
+      (_fibre, 'fibre'),
+      (_waterCustomWeight, 'waterCustomWeight'),
+      (_waterFactor, 'waterFactor'),
+      (_manualWater, 'manualWater'),
+      (_notes, 'notes'),
+    ]) {
+      setText(entry.$1, entry.$2);
+    }
+    setState(() {
+      if (data['gender'] != null) {
+        _gender = Gender.values.byName(data['gender'] as String);
+      }
+      if (data['diagnoses'] is List) {
+        _diagnoses
+          ..clear()
+          ..addAll((data['diagnoses'] as List).cast<String>());
+      }
+      if (data['calorieMethod'] != null) {
+        _calorieMethod = CalorieMethod.values.byName(
+          data['calorieMethod'] as String,
+        );
+      }
+      if (data['calorieBasis'] != null) {
+        _calorieBasis = WeightBasis.values.byName(
+          data['calorieBasis'] as String,
+        );
+      }
+      if (data['proteinBasis'] != null) {
+        _proteinBasis = WeightBasis.values.byName(
+          data['proteinBasis'] as String,
+        );
+      }
+      if (data['waterBasis'] != null) {
+        _waterBasis = WeightBasis.values.byName(data['waterBasis'] as String);
+      }
+      _approved = false;
+    });
+  }
+
+  Future<void> _openPresets() async {
+    var presets = await _repository.presets();
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Clinical presets',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Presets populate factors only. Dietitian review is still required.',
+                ),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: [
+                      for (final preset in presets)
+                        ListTile(
+                          leading: const Icon(Icons.bookmark_outline),
+                          title: Text(preset.name),
+                          onTap: () {
+                            Navigator.pop(sheetContext);
+                            _applyValues(preset.values);
+                          },
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () async {
+                              await _repository.deletePreset(preset.id!);
+                              presets = await _repository.presets();
+                              setSheetState(() {});
+                            },
+                          ),
+                        ),
+                      if (presets.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 18),
+                          child: Text('No saved presets yet.'),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                FilledButton.icon(
+                  onPressed: () async {
+                    final name = await _askPresetName(sheetContext);
+                    if (name == null || name.trim().isEmpty) return;
+                    await _repository.savePreset(
+                      AssessmentPreset(
+                        name: name.trim(),
+                        values: _presetValues,
+                      ),
+                    );
+                    presets = await _repository.presets();
+                    setSheetState(() {});
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('Save current factors as preset'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _askPresetName(BuildContext parentContext) async {
+    final controller = TextEditingController();
+    final result = await showDialog<String>(
+      context: parentContext,
+      builder: (context) => AlertDialog(
+        title: const Text('Preset name'),
+        content: TextField(controller: controller, autofocus: true),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
   }
 }
 
@@ -1266,24 +1589,41 @@ class _NumberField extends StatelessWidget {
     required this.suffix,
     this.integer = false,
     this.optional = false,
+    this.min,
+    this.max,
   });
   final TextEditingController controller;
   final String label, suffix;
   final bool integer, optional;
+  final double? min, max;
   @override
-  Widget build(BuildContext context) => TextField(
-    controller: controller,
-    keyboardType: TextInputType.numberWithOptions(decimal: !integer),
-    inputFormatters: [
-      FilteringTextInputFormatter.allow(
-        integer ? RegExp(r'[0-9]') : RegExp(r'[0-9.]'),
-      ),
-    ],
-    decoration: InputDecoration(
-      labelText: optional ? '$label (optional)' : label,
-      suffixText: suffix,
-    ),
-  );
+  Widget build(BuildContext context) =>
+      ValueListenableBuilder<TextEditingValue>(
+        valueListenable: controller,
+        builder: (context, value, _) {
+          final number = double.tryParse(value.text);
+          final invalid =
+              number != null &&
+              ((min != null && number < min!) ||
+                  (max != null && number > max!));
+          return TextField(
+            controller: controller,
+            keyboardType: TextInputType.numberWithOptions(decimal: !integer),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(
+                integer ? RegExp(r'[0-9]') : RegExp(r'[0-9.]'),
+              ),
+            ],
+            decoration: InputDecoration(
+              labelText: optional ? '$label (optional)' : label,
+              suffixText: suffix,
+              errorText: invalid
+                  ? 'Enter a value from ${min ?? 0} to ${max ?? '∞'}.'
+                  : null,
+            ),
+          );
+        },
+      );
 }
 
 class _FactorField extends StatelessWidget {
@@ -1300,7 +1640,21 @@ class _FactorField extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      _NumberField(controller: controller, label: label, suffix: suffix),
+      _NumberField(
+        controller: controller,
+        label: label,
+        suffix: suffix,
+        min: label == 'Activity factor' ? 1 : 0,
+        max: switch (label) {
+          'Protein factor' => 5,
+          'CHO percentage' => 100,
+          'Fibre target' => 100,
+          'Water factor' => 100,
+          'Calorie factor' => 100,
+          'Activity factor' => 3,
+          _ => null,
+        },
+      ),
       const SizedBox(height: 8),
       Wrap(
         spacing: 7,

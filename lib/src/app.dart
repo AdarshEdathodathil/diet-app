@@ -1,9 +1,40 @@
 import 'package:flutter/material.dart';
 
-import 'assessment_screen.dart';
+import 'assessment_repository.dart';
+import 'app_lock_gate.dart';
+import 'app_settings.dart';
+import 'dashboard_screen.dart';
 
-class ClinicalDietitianApp extends StatelessWidget {
-  const ClinicalDietitianApp({super.key});
+class ClinicalDietitianApp extends StatefulWidget {
+  ClinicalDietitianApp({super.key, AssessmentRepository? repository})
+    : repository = repository ?? AssessmentRepository();
+
+  final AssessmentRepository repository;
+
+  @override
+  State<ClinicalDietitianApp> createState() => _ClinicalDietitianAppState();
+}
+
+class _ClinicalDietitianAppState extends State<ClinicalDietitianApp> {
+  final settings = AppSettings();
+
+  @override
+  void initState() {
+    super.initState();
+    settings.addListener(_refresh);
+    settings.load();
+  }
+
+  @override
+  void dispose() {
+    settings.removeListener(_refresh);
+    settings.dispose();
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -20,7 +51,7 @@ class ClinicalDietitianApp extends StatelessWidget {
       outlineVariant: const Color(0xFFDCE6E3),
     );
     return MaterialApp(
-      title: 'DT Haritha',
+      title: 'Dt Haritha',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: scheme,
@@ -131,7 +162,23 @@ class ClinicalDietitianApp extends StatelessWidget {
           thickness: 1,
         ),
       ),
-      home: const AssessmentScreen(),
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: seed,
+          brightness: Brightness.dark,
+        ),
+        useMaterial3: true,
+      ),
+      themeMode: settings.themeMode,
+      home: settings.loaded
+          ? AppLockGate(
+              settings: settings,
+              child: DashboardScreen(
+                repository: widget.repository,
+                settings: settings,
+              ),
+            )
+          : const Scaffold(body: Center(child: CircularProgressIndicator())),
     );
   }
 }
